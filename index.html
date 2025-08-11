@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Bullshit Button</title>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --btn:#d92a2a;
+      --btn-dark:#b21f1f;
+      --btn-shadow: rgba(0,0,0,0.35);
+    }
+    html,body{height:100%;}
+    body{
+      margin:0;
+      background:var(--bg);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    /* Conteneur pour centrement et petite ergonomie mobile */
+    .wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;padding:24px;width:100%;max-width:900px}
+
+    /* Gros bouton 3D */
+    .bull-btn{
+      --size: min(62vw,520px);
+      width:var(--size);
+      height:calc(var(--size) / 3.6);
+      background:linear-gradient(180deg,var(--btn) 0%, var(--btn-dark) 100%);
+      color:white;
+      font-size: clamp(28px, 6vw, 72px);
+      font-weight:800;
+      border:none;
+      border-radius:18px;
+      box-shadow: 0 18px 0 -6px var(--btn-dark), 0 30px 40px var(--btn-shadow);
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-transform:none;
+      letter-spacing:1px;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Effet pressé tactile */
+    .bull-btn:active{
+      transform: translateY(10px) scale(0.995);
+      box-shadow: 0 6px 0 -6px var(--btn-dark), 0 18px 30px rgba(0,0,0,0.25);
+    }
+
+    /* Petite info sous le bouton */
+    .meta{font-size:14px;color:#444;text-align:center}
+    .meta small{color:#777}
+
+    /* Indicateur de chargement */
+    .status{font-size:14px;color:#222}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <button id="bull" class="bull-btn" aria-pressed="false">Bullshit Button</button>
+    <div class="meta"><small>Clique / touche le bouton — un son aléatoire sera joué.</small></div>
+    <div id="status" class="status hidden">Chargement des sons…</div>
+  </div>
+
+  <script>
+    // CONFIG : modifier si nécessaire
+    // URL qui renvoie un JSON avec la liste des URLs de sons (ex: ["/sounds/1.mp3","/sounds/2.mp3"]).
+    // Vous pouvez aussi remplacer par un tableau statique si vous connaissez déjà les URLs.
+    const SOUND_LIST_URL = '/sounds/list.json';
+
+    // Nombre d'audios préchargés en mémoire (optimisation)
+    const PREFETCH_COUNT = 6;
+
+    const btn = document.getElementById('bull');
+    const status = document.getElementById('status');
+
+    let soundUrls = [];
+    let audioPool = [];
+
+    function showStatus(text){
+      if(!text){ status.classList.add('hidden'); return; }
+      status.textContent = text;
+      status.classList.remove('hidden');
+    }
+
+    // Récupère la liste des sons depuis le serveur
+    async function fetchSoundList(){
+      showStatus('Chargement des sons…');
+      try{
+        const res = await fetch(SOUND_LIST_URL, {cache: 'no-store'});
+        if(!res.ok) throw new Error('Erreur HTTP ' + res.status);
+        const data = await res.json();
+        if(!Array.isArray(data)) throw new Error('Format invalide — JSON doit être un tableau d\'URLs');
+        soundUrls = data;
+        if(soundUrls.length === 0) throw new Error('Aucun son trouvé dans la liste.');
+        showStatus(` ${soundUrls.length} sons trouvés — prêt !`);
+        prefetchAudios(Math.min(PREFETCH_COUNT, soundUrls.length));
+      }catch(err){
+        console.error(err);
+        showStatus('Impossible de charger la liste de sons. Vérifiez la console.');
+      }
+    }
+
+    // Précharge quelques éléments audio pour réduire la latence
+    function prefetchAudios(n){
+      audioPool = new Array(n).fill(null).map(()=>null);
+      for(let i=0;i<n;i++){
+        const url = randomFrom(soundUrls);
+        const a = new Audio(url);
+        a.preload = 'auto';
+        // Autoriser crossOrigin si vos fichiers sont sur un autre domaine et permettent CORS
+        // a.crossOrigin = 'anonymous';
+        audioPool[i] = a;
+      }
+    }
+
+    function randomFrom(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+    // Joue un son aléatoire. Si un audio préchargé est disponible, l'utilise sinon crée un nouvel Audio.
+    function playRandom(){
+      if(soundUrls.length === 0){
+        showStatus('Aucun son chargé.');
+        return;
+      }
+      // Choisir URL aléatoire
+      const url = randomFrom(soundUrls);
+
+      // Essayer d'utiliser un audio préchargé libre
+      let audio = null;
+      for(let i=0;i<audioPool.length;i++){
+        const a = audioPool[i];
+        if(a && a.paused && (a.currentTime === 0 || a.ended)){
+          audio = a;
+          // Remplacer la source si elle diffère
+          if(a.src !== url) a.src = url;
+          break;
+        }
+      }
+
+      if(!audio){
+        audio = new Audio(url);
+        audio.preload = 'auto';
+      }
+
+      // Jouer — la promesse peut échouer si la politique du navigateur l'interdit
+      audio.play().then(()=>{
+        // ok
+        btn.animate([
+          { transform: 'scale(1)' },
+          { transform: 'scale(0.98)' },
+          { transform: 'scale(1)' }
+        ], { duration: 220, easing: 'ease-out' });
+      }).catch(err=>{
+        console.warn('Impossible de jouer le son :', err);
+        showStatus('Lecture bloquée par le navigateur (gesture requise).');
+      });
+    }
+
+    // Événements
+    btn.addEventListener('click', (e)=>{
+      playRandom();
+    }, {passive:true});
+
+    // Chargement initial
+    fetchSoundList();
+
+    // Pour tester localement sans serveur JSON :
+    // remplacer SOUND_LIST_URL par null et définir soundUrls manuellement, ex:
+    // soundUrls = ['/sounds/ouch.mp3','/sounds/woo.mp3'];
+  </script>
+</body>
+</html>
